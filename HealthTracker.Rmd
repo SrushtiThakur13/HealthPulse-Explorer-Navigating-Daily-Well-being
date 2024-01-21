@@ -1,0 +1,214 @@
+---
+title: "FitnessTracker"
+output: html_document
+date: "2024-01-21"
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(skimr)
+library(janitor)
+library(lubridate)
+library(ggplot2)
+
+```
+#read the files
+
+```{r}
+daily_activity <- read_csv("dailyActivity.csv")
+View(daily_activity)
+
+sleepDay <- read_csv("sleepDay.csv")
+View(sleepDay)
+
+hourlyIntensities<-read_csv(hourlyIntensities.csv)
+View(hourlyIntensities)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#Fixing formatting
+```{r}
+#SleepDay
+sleepDay$SleepDay = as.POSIXct(sleepDay$SleepDay, format = "%m/%d/%Y %H:%M:%S", tz = Sys.timezone())
+sleepDay$date<-format(sleepDay$SleepDay,format="%m/%d/%Y")
+sleepDay$time<-format(sleepDay$SleepDay,format="%H:%M:%S")
+```
+
+
+```{r}
+#hourlyintensities
+hourlyIntensities$ActivityHour=as.POSIXct(hourlyIntensities$ActivityHour, format="%m/%d/%Y %I:%M:%S %p", tz=Sys.timezone())
+hourlyIntensities$time <- format(hourlyIntensities$ActivityHour, format = "%H:%M:%S")
+hourlyIntensities$date <- format(hourlyIntensities$ActivityHour, format = "%m/%d/%y")
+
+```
+
+##Preview the data
+
+```{r}
+#dailyActivity
+head(daily_activity)
+str(daily_activity)
+```
+```{r}
+head(hourlyIntensities)
+```
+
+
+
+
+```{r}
+#SleepDay
+str(sleepDay)
+```
+
+#finding distinct users in each data frame
+```{r}
+n_distinct(daily_activity$Id)
+n_distinct(sleepDay$Id)
+
+```
+
+#summary statistics
+```{r}
+daily_activity %>%
+  select(TotalDistance,
+         VeryActiveDistance,
+         SedentaryActiveDistance,
+         LightActiveDistance,
+         VeryActiveMinutes,
+         SedentaryMinutes,
+         LightlyActiveMinutes) %>%
+  summary()
+
+sleepDay %>%
+  select(TotalMinutesAsleep,
+         TotalTimeInBed) %>%
+  summary()
+
+
+```
+#visualizing the data
+
+```{r}
+mean_values <- colMeans(daily_activity[, c("VeryActiveMinutes", "FairlyActiveMinutes", "LightlyActiveMinutes", "SedentaryMinutes")])
+#Create a data frame for ggplot
+activity_data <- data.frame(
+  Activity = c("Very Active", "Fairly Active", "Lightly Active", "Sedentary"),
+  MeanMinutes = mean_values)
+
+# Plot using ggplot with rotated X-axis labels
+ggplot(activity_data, aes(x = reorder(Activity, MeanMinutes), y = MeanMinutes, fill = Activity)) +
+  geom_col(color = "black") +
+  labs(title = "Mean Activity Minutes", x = "Activity Type", y = "Average Minutes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r}
+avg_calories <- daily_activity %>%
+  group_by(Id) %>%
+  summarise(avg_Calories = mean(Calories))
+
+# Categorize participants based on average calories
+avg_calories <- mutate(avg_calories, WeightCategory = case_when(
+  avg_Calories >= 1600 & avg_Calories <= 2200 ~ 'Maintain Weight',
+  avg_Calories < 1600 ~ 'Gain Weight',
+  avg_Calories > 2200 ~ 'Lose Weight'
+))
+
+# Plot the bar chart
+ggplot(avg_calories, aes(x = "", y = avg_Calories, fill = WeightCategory)) +
+  geom_bar(stat = 'identity', width = 1, color = 'white') +
+  coord_polar("y") +
+  labs(title = 'Average Calories and Weight Category by Participant', fill = 'Weight Category') +
+  theme_void() 
+
+```
+#sleepday
+
+
+```{r}
+ggplot(sleepDay, aes(x = TotalMinutesAsleep, y = TotalTimeInBed)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title = "Total Minutes Asleep vs. Total Time in Bed")
+
+```
+it's intriguing to note the concentration of data points where individuals spent more time in bed than the actual duration of sleep. 
+we can remind individuals to limit screen time before bedtime. 
+Suggest establishing a calming bedtime routine to help individuals unwind before sleep. This may include activities such as reading, gentle stretching, or practicing relaxation techniques.
+
+```{r}
+sleepDay <- mutate(sleepDay, SleepCategory = case_when(TotalMinutesAsleep >= 420 & TotalMinutesAsleep <= 540 ~ 'Recommended Sleep',TotalMinutesAsleep >= 360 & TotalMinutesAsleep < 420 | TotalMinutesAsleep > 540 ~ 'Appropriate Sleep',TotalMinutesAsleep < 360 ~ 'Inadequate Sleep',
+  TRUE ~ 'Other' ))
+
+ggplot(sleepDay, aes(x = SleepCategory, fill = SleepCategory)) + geom_bar() +labs(title = 'Sleep Categories', x = 'Sleep Category', y = 'Count') + theme_minimal()
+```
+
+```{r}
+colnames(daily_activity)
+```
+#Merging the two datasets together
+
+```{r}
+
+activity_sleep_combined <- merge(daily_activity, sleepDay, by = "Id", all = TRUE)
+```
+
+```{r}
+#View(activity_sleep_combined)
+n_distinct(activity_sleep_combined$Id)
+```
+#Total Minutes Asleep vs. Total Steps
+```{r}
+ggplot(data = activity_sleep_combined, aes(x = SleepDay, y = TotalSteps, fill = SleepDay)) + 
+  geom_bar(stat = "summary", fun = "mean") +
+  xlab("Sleep Day") +
+  ylab("Mean Total Steps") +
+  ggtitle("Mean Total Steps by Sleep Day")
+
+```
+there really is no relationship between sleeps and steps per day.
+
+```{r}
+ggplot(data=activity_sleep_combined, aes(x=TotalSteps, y=Calories)) + 
+  geom_point() + 
+  geom_smooth() + 
+  labs(title="Total Steps vs. Calories")
+```
+the more steps a person takes, the more calories they burn. It's a great idea to remind users of that to reach their presumed goals.
+
+```{r}
+ggplot(activity_data, aes(x = ActivityType, y = Minutes, fill = ActivityType)) +
+  geom_violin() +
+  xlab("Activity Type") +
+  ylab("Minutes") +
+  ggtitle("Total Minutes of Activity by Type") +
+  scale_fill_manual(values = c("red", "yellow", "brown", "green")) +
+  theme_minimal() +
+  coord_flip() 
+```
+This visualization indicates that there is significant potential for promoting and encouraging physical activity.
+```{r}
+int_new <- hourlyIntensities %>%
+  group_by(time) %>%
+  drop_na() %>%
+  summarise(mean_total_int = mean(TotalIntensity))
+
+ggplot(data=int_new, aes(x=time, y=mean_total_int)) + geom_histogram(stat = "identity", fill='violet') +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title="Average Total Intensity vs. Time")
+```
+It's evident that individuals are most active between 5 pm and 7 pm, with additional peaks observed around 12 pm to 2 pm. These time intervals align with typical lunch breaks and the conclusion of the workday during the week. These periods present opportune moments to promote and encourage activities such as workouts, jogging, or taking a pet for a walk.
+
+##Findings
+Analyzing the data from non-Bellabeat smart devices, we observe a prevalent pattern among women users who tend to engage in light activity, falling below the recommended daily walking levels. Encouraging these users to maintain healthier sleep and activity levels could be beneficial. The absence of weight tracking data suggests a potential disinterest or preference for privacy in this area.
+
+The key takeaway for stakeholders is the importance of incorporating motivational alerts and educational notifications to drive increased user activity. The Bellabeat wellness watch offers a seamless solution, tracking activity, sleep, and stress without imposing daily log entries. Leveraging insights from peak activity hours, personalized prompts can effectively motivate women to enhance their activity levels.
+
+Bellabeat's overarching mission to empower women aligns with the product's potential. Maximizing interactivity through alerts and notifications will not only engage users but also encourage them to explore and optimize their personal data. The focus should be on creating an app experience that actively supports women in unlocking their full potential.
+
